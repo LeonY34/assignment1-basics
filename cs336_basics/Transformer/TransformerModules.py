@@ -88,7 +88,7 @@ class RMSNorm(torch.nn.Module):
     def forward(self, x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_model"]:
         in_dtype = x.dtype
         x = x.to(dtype=torch.float32)
-        out = x / torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + self.eps) * self.weights
+        out = x / torch.sqrt(torch.mean(x.square(), dim=-1, keepdim=True) + self.eps) * self.weights
         return out.to(dtype=in_dtype)
         
         
