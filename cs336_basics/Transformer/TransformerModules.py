@@ -189,6 +189,10 @@ class RoPE(torch.nn.Module):
             x_grouped, r_sliced, "... seq_len d_k_2 i, ... seq_len d_k_2 j i -> ... seq_len d_k_2 j"
         ).reshape(x.shape)
 
+def softmax(x: Tensor, dim: int = -1):
+    mid: Tensor = torch.exp(x - x.max(dim=dim, keepdim=True).values)
+    return mid / mid.sum(dim=dim, keepdim=True)
+
 if __name__ == "__main__":
     
     # model = Linear(3, 4)
@@ -200,5 +204,8 @@ if __name__ == "__main__":
     # )
     # print(model(token))
     # model = RoPE(10000, 2, 4)
-    pass
+    # pass
+    x = torch.rand(2, 3)
+    print(x)
+    print(softmax(x))
     
