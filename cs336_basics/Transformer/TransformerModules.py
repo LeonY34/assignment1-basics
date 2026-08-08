@@ -91,6 +91,57 @@ class RMSNorm(torch.nn.Module):
         out = x / torch.sqrt(torch.mean(x.square(), dim=-1, keepdim=True) + self.eps) * self.weights
         return out.to(dtype=in_dtype)
         
+class SwiGLUFFN(torch.nn.Module):
+    # SwiGLUFFN(x) = SwiGLU(x, W1, W2, W3) = (SiLU(x@W1^T) * x@W3^T)@W2^T
+    #              = (x@W1^T * sigmoid(x@W1^T) * x@W3^T)@W2^T
+    # x: [d_model], W1, W3: [d_ff, d_model], W2: [d_model, d_ff]
+    d_model: int
+    d_ff: int
+    w1: Float[Tensor, "d_ff d_model"]
+    w2: Float[Tensor, "d_model d_ff"]
+    w3: Float[Tensor, "d_ff d_model"]
+    
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.d_ff = ((d_model + 23) // 24) * 64 if d_ff is None else d_ff
+        self.w1 = torch.nn.Parameter(
+            torch.empty(
+                self.d_ff, d_model, device=device, dtype=dtype
+            )
+        )
+        self.w2 = torch.nn.Parameter(
+            torch.empty(
+                d_model, self.d_ff, device=device, dtype=dtype
+            )
+        )
+        self.w3 = torch.nn.Parameter(
+            torch.empty(
+                self.d_ff, d_model, device=device, dtype=dtype
+            )
+        )
+        std = math.sqrt(2 / (self.d_ff + d_model))
+        torch.nn.init.trunc_normal_(self.w1, 0, std, -3 * std, 3 * std)
+        torch.nn.init.trunc_normal_(self.w2, 0, std, -3 * std, 3 * std)
+        torch.nn.init.trunc_normal_(self.w3, 0, std, -3 * std, 3 * std)
+    
+    def forward(self, x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_model"]:
+        
+        x_w1 = einops.einsum(
+            x, self.w1, "... d_model, d_ff d_model -> ... d_ff"
+        )
+        mid = x_w1 * torch.sigmoid(x_w1) * einops.einsum(
+            x, self.w3, "... d_model, d_ff d_model -> ... d_ff"
+        )
+        return einops.einsum(
+            mid, self.w2, "... d_ff, d_model d_ff -> ... d_model"
+        )
         
 
 if __name__ == "__main__":
