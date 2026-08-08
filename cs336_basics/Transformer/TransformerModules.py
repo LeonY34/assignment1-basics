@@ -142,16 +142,63 @@ class SwiGLUFFN(torch.nn.Module):
         return einops.einsum(
             mid, self.w2, "... d_ff, d_model d_ff -> ... d_model"
         )
+
+class RoPE(torch.nn.Module):
+    
+    theta: float
+    d_k: int
+    d_k_2: int
+    max_seq_length: int
+    r: Float[Tensor, "max_seq_length d_k_2 2 2"]
+    
+    # def calc_buffer(self):
         
+    #     # j = torch.arange(self.d_k_2).view(1, self.d_k_2)
+        
+        
+    
+    def __init__(
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_length: int,
+        device: torch.device | None = None
+    ):
+        super().__init__()
+        assert d_k % 2 == 0
+        self.theta = theta
+        self.d_k = d_k
+        self.d_k_2 = d_k // 2
+        self.max_seq_length = max_seq_length
+        self.register_buffer("r", torch.empty(max_seq_length, self.d_k_2, 2, 2, device=device), persistent=False)
+        self.register_buffer("j", torch.arange(self.d_k_2, device=device).view(1, self.d_k_2), persistent=False)
+        
+        i = torch.arange(self.max_seq_length, device=device).view(self.max_seq_length, 1)
+        x = i / (self.theta ** (self.j * 2 / self.d_k))
+        self.r[..., 0, 0] = torch.cos(x)
+        self.r[..., 0, 1] = -torch.sin(x)
+        self.r[..., 1, 0] = torch.sin(x)
+        self.r[..., 1, 1] = torch.cos(x)
+        # print(self.r)
+        
+    def forward(self, x: Float[Tensor, "... seq_len d_k"], token_positions: Int[Tensor, "... seq_len"]) -> Float[Tensor, "... seq_len d_k"]:
+        assert x.shape[-1] == self.d_k
+        r_sliced: Int[Tensor, "... seq_len d_k_2 2 2"] = self.r[token_positions]
+        x_grouped: Int[Tensor, "... seq_len d_k_2 2"] = x.reshape(*x.shape[:-1], -1, 2)
+        return einops.einsum(
+            x_grouped, r_sliced, "... seq_len d_k_2 i, ... seq_len d_k_2 j i -> ... seq_len d_k_2 j"
+        ).reshape(x.shape)
 
 if __name__ == "__main__":
     
     # model = Linear(3, 4)
     # print(model.weights)
     # print(model.weights.data)
-    model = RMSNorm(10)
-    token = torch.ones(
-        2, 3, 10
-    )
-    print(model(token))
+    # model = RMSNorm(10)
+    # token = torch.ones(
+    #     2, 3, 10
+    # )
+    # print(model(token))
+    # model = RoPE(10000, 2, 4)
+    pass
     
