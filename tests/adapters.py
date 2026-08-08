@@ -123,7 +123,8 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    return TransformerModules.attention(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
@@ -157,7 +158,15 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    model = TransformerModules.MultiHeadAttention(d_model, num_heads)
+    state = model.state_dict()
+    state["w_q"] = q_proj_weight
+    state["w_k"] = k_proj_weight
+    state["w_v"] = v_proj_weight
+    state["w_o"] = o_proj_weight
+    model.load_state_dict(state)
+    return model(in_features)
 
 
 def run_multihead_self_attention_with_rope(
