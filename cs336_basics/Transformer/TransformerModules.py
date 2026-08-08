@@ -79,6 +79,8 @@ class Linear(torch.nn.Module):
 class Embedding(torch.nn.Module):
     
     embed_map: Float[Tensor, "vocab_size d_model"]
+    num_embeddings: int
+    embedding_dim: int
     
     def __init__(
         self,
@@ -87,8 +89,9 @@ class Embedding(torch.nn.Module):
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):
-        
         super().__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
         self.embed_map = Init.embedding(num_embeddings, embedding_dim, device=device, dtype=dtype)
         
     def forward(self, token_ids: Int[Tensor, "..."]) -> Float[Tensor, "... d_model"]:
@@ -124,11 +127,9 @@ class SwiGLUFFN(torch.nn.Module):
     # SwiGLUFFN(x) = SwiGLU(x, W1, W2, W3) = (SiLU(x@W1^T) * x@W3^T)@W2^T
     #              = (x@W1^T * sigmoid(x@W1^T) * x@W3^T)@W2^T
     # x: [d_model], W1, W3: [d_ff, d_model], W2: [d_model, d_ff]
-    d_model: int
-    d_ff: int
-    w1: Float[Tensor, "d_ff d_model"]
-    w2: Float[Tensor, "d_model d_ff"]
-    w3: Float[Tensor, "d_ff d_model"]
+    w1: Linear
+    w2: Linear
+    w3: Linear
     
     def __init__(
         self,
@@ -138,23 +139,28 @@ class SwiGLUFFN(torch.nn.Module):
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        self.d_model = d_model
-        self.d_ff = ((d_model + 23) // 24) * 64 if d_ff is None else d_ff
-        self.w1 = Init.linear(self.d_ff, d_model, device=device, dtype=dtype)
-        self.w2 = Init.linear(d_model, self.d_ff, device=device, dtype=dtype)
-        self.w3 = Init.linear(self.d_ff, d_model, device=device, dtype=dtype)
+        d_ff = ((d_model + 23) // 24) * 64 if d_ff is None else d_ff
+        # self.w1 = Init.linear(self.d_ff, d_model, device=device, dtype=dtype)
+        # self.w2 = Init.linear(d_model, self.d_ff, device=device, dtype=dtype)
+        # self.w3 = Init.linear(self.d_ff, d_model, device=device, dtype=dtype)
+        self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
     
     def forward(self, x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_model"]:
         
-        x_w1 = einops.einsum(
-            x, self.w1, "... d_model, d_ff d_model -> ... d_ff"
-        )
-        mid = x_w1 * torch.sigmoid(x_w1) * einops.einsum(
-            x, self.w3, "... d_model, d_ff d_model -> ... d_ff"
-        )
-        return einops.einsum(
-            mid, self.w2, "... d_ff, d_model d_ff -> ... d_model"
-        )
+        # x_w1 = einops.einsum(
+        #     x, self.w1, "... d_model, d_ff d_model -> ... d_ff"
+        # )
+        # mid = x_w1 * torch.sigmoid(x_w1) * einops.einsum(
+        #     x, self.w3, "... d_model, d_ff d_model -> ... d_ff"
+        # )
+        # return einops.einsum(
+        #     mid, self.w2, "... d_ff, d_model d_ff -> ... d_model"
+        # )
+        x_w1 = self.w1(x)
+        mid = x_w1 * torch.sigmoid(x_w1) * self.w3(x)
+        return self.w2(mid)
 
 class RoPE(torch.nn.Module):
     
@@ -169,7 +175,8 @@ class RoPE(torch.nn.Module):
         theta: float,
         d_k: int,
         max_seq_length: int,
-        device: torch.device | None = None
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
         assert d_k % 2 == 0
@@ -177,10 +184,10 @@ class RoPE(torch.nn.Module):
         self.d_k = d_k
         self.d_k_2 = d_k // 2
         self.max_seq_length = max_seq_length
-        self.register_buffer("r", torch.empty(max_seq_length, self.d_k_2, 2, 2, device=device), persistent=False)
-        self.register_buffer("j", torch.arange(self.d_k_2, device=device).view(1, self.d_k_2), persistent=False)
+        self.register_buffer("r", torch.empty(max_seq_length, self.d_k_2, 2, 2, device=device, dtype=dtype), persistent=False)
+        self.register_buffer("j", torch.arange(self.d_k_2, device=device, dtype=dtype).view(1, self.d_k_2), persistent=False)
         
-        i = torch.arange(self.max_seq_length, device=device).view(self.max_seq_length, 1)
+        i = torch.arange(self.max_seq_length, device=device, dtype=dtype).view(self.max_seq_length, 1)
         x = i / (self.theta ** (self.j * 2 / self.d_k))
         self.r[..., 0, 0] = torch.cos(x)
         self.r[..., 0, 1] = -torch.sin(x)
@@ -188,9 +195,10 @@ class RoPE(torch.nn.Module):
         self.r[..., 1, 1] = torch.cos(x)
         # print(self.r)
         
-    def forward(self, x: Float[Tensor, "... seq_len d_k"], token_positions: Int[Tensor, "... seq_len"]) -> Float[Tensor, "... seq_len d_k"]:
+    def forward(self, x: Float[Tensor, "... seq_len d_k"], token_positions: Int[Tensor, "... seq_len"] | None = None) -> Float[Tensor, "... seq_len d_k"]:
         assert x.shape[-1] == self.d_k
-        r_sliced: Int[Tensor, "... seq_len d_k_2 2 2"] = self.r[token_positions]
+        seq_len = x.shape[-2]
+        r_sliced: Int[Tensor, "... seq_len d_k_2 2 2"] = self.r[token_positions] if token_positions is not None else self.r[:seq_len]
         # x_grouped: Int[Tensor, "... seq_len d_k_2 2"] = x.reshape(*x.shape[:-1], -1, 2)
         y = einops.rearrange(x, "... seq_len (d_k_2 d_2) -> ... seq_len d_k_2 d_2", d_2=2)
         return einops.einsum(
@@ -221,11 +229,14 @@ class MultiHeadAttention(torch.nn.Module):
     w_k: Float[Tensor, "d_model d_model"]
     w_v: Float[Tensor, "d_model d_model"]
     w_o: Float[Tensor, "d_model d_model"]
+    rope: RoPE
     
     def __init__(
         self,
         d_model: int,
         num_heads: int,
+        theta: float | None = None,
+        max_seq_length: int | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None
     ):
@@ -239,8 +250,16 @@ class MultiHeadAttention(torch.nn.Module):
         self.w_k = Init.linear(d_model, d_model, device=device, dtype=dtype)
         self.w_v = Init.linear(d_model, d_model, device=device, dtype=dtype)
         self.w_o = Init.linear(d_model, d_model, device=device, dtype=dtype)
+        
+        # rope
+        if theta is None or max_seq_length is None: self.rope = None
+        else: self.rope = RoPE(theta, self.d_k, max_seq_length, device=device, dtype=dtype)
     
-    def forward(self, x: Float[Tensor, "... seq_len d_model"]) -> Float[Tensor, "... seq_len d_model"]:
+    def forward(
+        self, 
+        x: Float[Tensor, "... seq_len d_model"], 
+        token_positions: Int[Tensor, " ... sequence_length"] | None = None
+    ) -> Float[Tensor, "... seq_len d_model"]:
         seq_len = x.shape[-2]
         # calc q, k, v
         q = einops.einsum(x, self.w_q, "... seq_len d_model, d_1 d_model -> ... seq_len d_1")
@@ -257,6 +276,11 @@ class MultiHeadAttention(torch.nn.Module):
         k = einops.rearrange(k, "... seq_len (num_heads d_k) -> ... num_heads seq_len d_k", num_heads=self.num_heads)
         v = einops.rearrange(v, "... seq_len (num_heads d_k) -> ... num_heads seq_len d_k", num_heads=self.num_heads)
         
+        # apply rope
+        if self.rope is not None:
+            q = self.rope(q, token_positions)
+            k = self.rope(k, token_positions)
+        
         # calc mask
         mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=q.device))
         
@@ -267,7 +291,77 @@ class MultiHeadAttention(torch.nn.Module):
         return einops.einsum(
             einops.rearrange(atten, "... num_heads seq_len d_k -> ... seq_len (num_heads d_k)"),
             self.w_o, "... seq_len d_model, d_1 d_model -> ... seq_len d_1")
+
+class TransformerBlock(torch.nn.Module):
+    rms1: RMSNorm
+    rms2: RMSNorm
+    atten: MultiHeadAttention
+    swiglu: SwiGLUFFN
+    
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int | None = None,
+        theta: float | None = None,
+        max_seq_length: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
+    ):
+        super().__init__()
+        self.rms1 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.rms2 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.atten = MultiHeadAttention(d_model, num_heads, theta, max_seq_length, device=device, dtype=dtype)
+        self.swiglu = SwiGLUFFN(d_model, d_ff, device=device, dtype=dtype)
+    
+    def forward(self, x: Float[Tensor, "... seq_len d_model"]) -> Float[Tensor, "... seq_len d_model"]:
         
+        # layer 1
+        y = x + self.atten(self.rms1(x))
+        
+        # layer 2
+        return y + self.swiglu(self.rms2(y))
+    
+class TransformerLM(torch.nn.Module): # 最后还没softmax。
+    tblocks: torch.nn.ModuleList
+    in_embed: Embedding
+    rms_final: RMSNorm
+    out_embed: Linear
+    num_layers: int
+    
+    def __init__(
+        self,
+        vocab_size: int,
+        num_layers: int,
+        d_model: int,
+        num_heads: int,
+        d_ff: int | None = None,
+        theta: float | None = None,
+        context_length: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
+    ):
+        super().__init__()
+        self.num_layers = num_layers
+        self.tblocks = torch.nn.ModuleList([
+            TransformerBlock(d_model, num_heads, d_ff, theta, context_length, device=device, dtype=dtype) 
+            for _ in range(num_layers)
+        ])
+        self.in_embed = Embedding(vocab_size, d_model, device=device, dtype=dtype)
+        self.rms_final = RMSNorm(d_model, device=device, dtype=dtype)
+        self.out_embed = Linear(d_model, vocab_size, device=device, dtype=dtype)
+    
+    def forward(self, x: Int[Tensor, "... seq_len"]) -> Float[Tensor, "... seq_len vocab_size"]:
+        # 得到的是每个vocab_size中word的概率。seq_len维的第i个就表示预测的第i+1个的概率分布
+        # embedding
+        hidden = self.in_embed(x)
+        
+        # transformer
+        for block in self.tblocks:
+            hidden = block(hidden)
+        
+        # Return logits; the training loss applies softmax internally.
+        return self.out_embed(self.rms_final(hidden))
 
 if __name__ == "__main__":
     
