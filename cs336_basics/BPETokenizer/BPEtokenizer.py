@@ -9,6 +9,8 @@ from typing import TypeVar
 import time
 import heapq
 import pickle
+import numpy as np
+import h5py
 # import json
 
 T = TypeVar("T")
@@ -690,6 +692,78 @@ class BPEtokenizer:
                     for x in (self.encode_byte_bruteforce(word) if len(word) < 100 else self.encode_byte_heap(word))
                 )
         return tokens
+    
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:
+        for text in iterable:
+            yield from self.encode(text)
+    
+    def encode_file(self, input_filename: str, store_filename: str, parallel_num: int = 6):
+        # pattern = b"|".join(
+        #     re.escape(word.encode("utf-8"))
+        #     for word in self.special_words
+        # )
+        # pre_text = b""
+        # write_buffer = []
+        # with open(input_filename, "rb") as f:
+        #     while True:
+        #         print(f"encoding file {input_filename}...")
+        #         chunk = f.read(self.PRE_TOKENIZE_CHUNK_SIZE)
+        #         if chunk == b"":
+        #             write_buffer += [i for i in self.encode_iterable(re.findall(self.PAT, pre_text.decode('utf-8')))]
+        #             break
+        #         text = pre_text + chunk
+        #         fr = 0
+        #         for match in re.finditer(pattern, text):
+        #             separator = match.group()
+        #             start, end = match.span()
+        #             write_buffer += [i for i in self.encode_iterable(re.findall(self.PAT, text[fr: start].decode('utf-8')))]
+        #             fr = end
+        #             write_buffer += self.encode(separator.decode("utf-8"))
+        #         pre_text = text[fr:]
+        # arr = np.array(write_buffer, dtype=np.int16)
+        # np.save(store_filename, arr)
+        self.parallel_num = parallel_num
+        words = self.pre_tokenize_from_file(input_filename)
+        print("pre-tokenized.")
+        word_to_token = {word : self.encode(word.decode('utf-8')) for word in words.keys()}
+        # total_tokens = [cnt * len(word_to_token[word]) for word, cnt in words.items()]
+        pattern = b"|".join(
+            re.escape(word.encode("utf-8"))
+            for word in self.special_words
+        )
+        pre_text = b""
+        write_buffer = []
+        print(f"Start tokenizing {input_filename}...")
+        st_time = time.time()
+        idx = 0
+        with open(input_filename, "rb") as f, h5py.File(store_filename, "w") as fout:
+            while True:
+                chunk = f.read(self.PRE_TOKENIZE_CHUNK_SIZE)
+                if chunk == b"":
+                    write_buffer += [np.array(word_to_token[word.encode('utf-8')], dtype=np.int16) for word in re.findall(self.PAT, pre_text.decode('utf-8'))]
+                    pre_text = b""
+                if len(write_buffer) != 0:
+                    # np.savez(store_filename, np.concatenate(write_buffer))
+                    print(f"saving {idx}-th...")
+                    fout.create_dataset(f"tokens/{idx}", data=np.concatenate(write_buffer))
+                    write_buffer = []
+                    idx += 1
+                    # print(f"save complete.")
+                text = pre_text + chunk
+                if text == b"":
+                    break
+                fr = 0
+                for match in re.finditer(pattern, text):
+                    separator = match.group()
+                    start, end = match.span()
+                    write_buffer += [np.array(word_to_token[word.encode('utf-8')], dtype=np.int16) for word in re.findall(self.PAT, text[fr: start].decode('utf-8'))]
+                    fr = end
+                    write_buffer += [np.array(self.encode(separator.decode('utf-8')), dtype=np.int16)]
+                pre_text = text[fr:]
+        print(f"Done. Time: {time.time() - st_time} s.")
+        # arr = np.concatenate(write_buffer)
+        # np.save(store_filename, arr)     
+        # print(f"saving complete at {store_filename}.")
 
     def decode(self, tokens: list[int]) -> str:
         
@@ -716,18 +790,22 @@ class BPEtokenizer:
             
 if __name__ == "__main__":
     # text = "Hello! My name is lyaaa! hhhhhh bybysfaoefjoae is good. <|endoftext|>"
-    tokenizer = BPEtokenizer(vocab_size=2000, special_words=["<|endoftext|>"], parallel_num=6)
+    tokenizer = BPEtokenizer(vocab_size=10000, special_words=["<|endoftext|>"], parallel_num=6)
     # tokenizer = BPEtokenizer(vocab_size=32000, special_words=["<|endoftext|>"], parallel_num=6)
     store_path = "/Users/leon34/Desktop/CSdiy/stanfordCS336/Code/Lab/assignment1-basics/cs336_basics/BPETokenizer/trained_data/"
     data_path = "/Users/leon34/Desktop/CSdiy/stanfordCS336/Code/Lab/assignment1-basics/data/"
+    tokenized_path = "/Users/leon34/Desktop/CSdiy/stanfordCS336/Code/Lab/assignment1-basics/data/tokenized"
     ts_train_path = os.path.join(data_path, "TinyStoriesV2-GPT4-train.txt")
     ts_valid_path = os.path.join(data_path, "TinyStoriesV2-GPT4-valid.txt")
     owt_train_path = os.path.join(data_path, "owt_train.txt")
     owt_valid_path = os.path.join(data_path, "owt_valid.txt")
     
-    ts_train_name = ""
+    ts_train_tokenized_path = os.path.join(tokenized_path, "ts_train_tokenized.hd5")
+    owt_train_tokenized_path = os.path.join(tokenized_path, "owt_train_tokenized.hd5")
+    
+    ts_train_name = "_10000"
     ts_valid_name = "_2000"
-    owt_train_name = ""
+    owt_train_name = "_32000"
     owt_valid_name = ""
     
     ts_train_store_path = os.path.join(store_path, f"ts_train{ts_train_name}.pkl")
@@ -758,22 +836,22 @@ if __name__ == "__main__":
     # tokenizer.train(owt_valid_path, store_file=owt_valid_store_path)
     # tokenizer.train(owt_train_path, store_file=owt_train_store_path)
     
-    tokenizer.load_from_file(ts_valid_store_path)
-    # tokenizer.load_from_file(ts_train_store_path)
+    # tokenizer.load_from_file(ts_valid_store_path)
+    tokenizer.load_from_file(owt_train_store_path)
     # tokenizer.load_from_file(owt_valid_store_path)
     # tokenizer.load_from_file(train_store_path)
-    print(tokenizer.longest_tokens(5))
-    text = "s"
+    # print(tokenizer.longest_tokens(5))
+    # text = "s"
     
 #     text = """Once upon a time, there was a little girl named Sue. Sue was very thoughtful. She always helped her mom and dad. One day, Sue saw her mom trying to open a door with a broken handle. Sue wanted to help her mom.
 # Sue asked her mom, "Can I help you?" Her mom said, "Yes, Sue. We need a new handle for the door. Can you ask dad if he has one?" Sue went to her dad and asked, "Dad, do we have a new handle for the door?" Her dad looked at Sue and said, "I am not sure, let's look together."
 # Sue and her dad looked for a new handle. They found one, but it was very high up. Sue's dad tried to reach it, but he couldn't. Sue had an idea. She said, "Dad, let's use a chair to stand on." Her dad refused. He said, "No, Sue. That is not safe. Let's ask mom for help." So, they asked mom for help, and she found a safe way to get the handle. They fixed the door together, and Sue felt happy that she could help her mom and dad.
 # <|endoftext|>"""
-    tokens = tokenizer.encode(text)
-    print(tokens)
+    # tokens = tokenizer.encode(text)
+    # print(tokens)
     
-    decoded = tokenizer.decode(tokens)
-    print(decoded)
+    # decoded = tokenizer.decode(tokens)
+    # print(decoded)
     
     # tokenizer2 = Tokenizer(tokenizer)
     # tokens = tokenizer.encode(text)
@@ -781,4 +859,5 @@ if __name__ == "__main__":
     
     # decoded = tokenizer.decode(tokens)
     # print(decoded)
+    tokenizer.encode_file(owt_train_path, owt_train_tokenized_path, parallel_num=8)
     # tokenizer.load_from_file("Lab1/assignment1-basics/cs336_basics/BPETokenizer/trained_data/TinyStoriesV2-GPT4-valid.txt.pkl")

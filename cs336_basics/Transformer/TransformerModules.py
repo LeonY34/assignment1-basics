@@ -3,6 +3,8 @@ import einops
 from jaxtyping import Float, Int, Bool
 from torch import Tensor
 import math
+from collections.abc import Callable, Iterable
+from typing import Optional
 
 class Init:
     @staticmethod
@@ -363,10 +365,118 @@ class TransformerLM(torch.nn.Module): # 最后还没softmax。
         # Return logits; the training loss applies softmax internally.
         return self.out_embed(self.rms_final(hidden))
 
+def cross_entropy(
+    logits: Float[Tensor, "... batch_size vocab_size"], 
+    x: Int[Tensor, "... batch_size"]
+) -> Float[Tensor, "..."]:
+    
+    # sum -log p_i = sum -log softmax logits_i = sum -[(logits_i - m) - logsumexp(logits)]
+    l = logits - logits.max(dim=-1, keepdim=True).values
+    return (torch.logsumexp(l, dim=-1, keepdim=False) - l.gather(dim=-1, index=x.unsqueeze(-1)).squeeze(-1)).mean(dim=-1)
+
+def perplexity(
+    logits: Float[Tensor, "... batch_size seq_len vocab_size"], 
+    x: Int[Tensor, "... batch_size seq_len"]
+) -> Float[Tensor, "... batch_size"]:
+    return torch.exp(cross_entropy(logits, x))
+
+class SGD(torch.optim.Optimizer):
+    def __init__(self, params, lr=1e-3):
+        if lr < 0: raise ValueError(f"Invalid learning rate: {lr}")
+        defaults = {"lr": lr}
+        super().__init__(params, defaults)
+        
+    def step(self, closure: Optional[Callable] = None):
+        loss = None if closure is None else closure()
+        # print(self.param_groups)
+        # print(self.state)
+        for group in self.param_groups: # 每个group是一个字典[str, list[parameters]]
+            lr = group["lr"] # learning rate，这一个group都用这个learning rate
+            for p in group["params"]: # 对于params中的每一个parameter
+                # print(p)
+                if p.grad is None: continue # 不需要梯度下降
+                state = self.state[p]
+                t = state.get("t", 0)
+                grad = p.grad.data
+                p.data -= lr / math.sqrt(t + 1) * grad
+                state["t"] = t + 1
+        return loss
+    
+def train_sgd_example():
+    weights = torch.nn.Parameter(5 * torch.randn(10, 10))
+    opt = SGD([weights], lr=1e3)
+    
+    for t in range(100):
+        opt.zero_grad()
+        loss = (weights ** 2).mean()
+        print(loss.cpu().item())
+        loss.backward()
+        opt.step()
+
+class AdamW(torch.optim.Optimizer):
+    def __init__(
+        self, 
+        params, 
+        lr: float | Tensor = 0.001, 
+        betas: tuple[float | Tensor, float | Tensor] = (0.9, 0.999), 
+        eps: float = 1e-8, 
+        weight_decay: float = 0.01):
+        if lr < 0: raise ValueError(f"Invalid alpha {lr}.")
+        if betas[0] >= 1 or betas[0] < 0 or betas[1] >= 1 or betas[1] < 0: raise ValueError(f"Invalid betas {betas}")
+        if eps < 0: raise ValueError(f"Invalid eps {eps}")
+        if weight_decay < 0: raise ValueError(f"Invalid weight_decay {weight_decay}")
+        defaults = {"lr": lr, "eps": eps, "betas": betas, "weight_decay": weight_decay}
+        super().__init__(params, defaults)
+    
+    def step(self, closure: Optional[Callable] = None):
+        loss = None if closure is None else closure()
+        for group in self.param_groups:
+            lr = group["lr"]
+            betas = group["betas"]
+            eps = group["eps"]
+            weight_decay = group["weight_decay"]
+            for param in group["params"]:
+                if param.grad is None: continue
+                state = self.state[param]
+                grad = param.grad.data
+                if "m" not in state: state["m"] = torch.zeros_like(grad)
+                if "v" not in state: state["v"] = torch.zeros_like(grad)
+                if "b_t" not in state: state["b_t"] = torch.ones(2, device=state["m"].device)
+                
+                state["m"] = state["m"] * betas[0] + grad * (1 - betas[0])
+                state["v"] = state["v"] * betas[1] + grad * grad * (1 - betas[1])
+                state["b_t"] *= torch.tensor(betas, device=state["b_t"].device)
+                alpha = lr * math.sqrt(1 - state["b_t"][1]) / (1 - state["b_t"][0])
+                param.data -= lr * weight_decay * param
+                param.data-= alpha * state["m"] / (torch.sqrt(state["v"]) + eps)
+                
+        return loss
+
+def lr_cos_schedule(t, alpha_max, alpha_min, T_w, T_c):
+    if t < T_w: return t / T_w * alpha_max
+    if t < T_c: return alpha_min + 0.5 * (alpha_max - alpha_min) * (1 + math.cos(math.pi * (t - T_w) / (T_c - T_w)))
+    return alpha_min
+
+def clip_gradient(param_list: Iterable[torch.nn.Parameter], max_l2_norm: float, eps: float = 1e-6):
+    # for param in param_list:
+    #     if param.grad is None: continue
+    #     grad = param.grad.data
+    #     norm = grad.norm()
+    #     if norm >= max_l2_norm: grad *= max_l2_norm / (norm + eps)
+    norm = torch.sqrt(torch.stack([
+        param.grad.pow(2).sum()
+        for param in param_list
+        if param.grad is not None
+    ]).sum())
+    if norm >= max_l2_norm:
+        scale = max_l2_norm / (norm + eps)
+        for param in param_list:
+            if param.grad is not None:
+                param.grad.data *= scale
+
 if __name__ == "__main__":
     
     # model = Linear(3, 4)
-    # print(model.weights)
     # print(model.weights.data)
     # model = RMSNorm(10)
     # token = torch.ones(
@@ -379,5 +489,12 @@ if __name__ == "__main__":
     # print(x)
     # print(softmax(x))
     
-    print(torch.tril(torch.ones(3, 3)))
+    # print(torch.tril(torch.ones(3, 3)))
+    # logits = torch.rand(3, 4, 5)
+    # print(logits)
+    # x = torch.randint(0, 5, (3, 4))
+    # print(x)
+    # print(cross_entropy(logits, x))
+    # train_sgd_example()
+    print(torch.optim.AdamW())
     
