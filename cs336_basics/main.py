@@ -172,9 +172,8 @@ def infer_bruteforce(
 
                 sampled_index = torch.multinomial(filtered_probs, num_samples=1)
                 next_token = sorted_indices[sampled_index].squeeze(0)
-
-            if next_token.item() == 256: break # special token
             input_tokens.append(next_token.item())
+            if next_token.item() == 256: break # special token
 
     return tokenizer.decode(input_tokens)
 
@@ -209,6 +208,7 @@ if __name__ == "__main__":
         tokenizer,
         model,
         max_tokens=256,
+        temperature=1.0,
         device=device,
     )
     print(s)
