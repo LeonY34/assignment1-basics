@@ -133,6 +133,50 @@ def train(
     logger.info("Training complete at iteration=%d", max_iterations)
         
 
+def infer_bruteforce(
+    input: str,
+    tokenizer: BPEtokenizer,
+    model: TransformerModules.TransformerLM,
+    max_tokens: int = 1024,
+    temperature: float = 0.1,
+    top_p: float = 0.9,
+    device: torch.device = None
+):
+    if temperature < 0.0:
+        raise ValueError(f"Error temperature: {temperature}.")
+    if top_p <= 0.0 or top_p > 1.0:
+        raise ValueError(f"Error top_p: {top_p}.")
+    input_tokens = tokenizer.encode(input)
+    model.eval()
+    with torch.inference_mode():
+        while len(input_tokens) < max_tokens:
+            x = torch.tensor(
+                input_tokens[-model.context_length:],
+                dtype=torch.long,
+                device=device,
+            ).unsqueeze(0)
+            logits = model(x)[0, -1]
+            
+            if temperature == 0.0:
+                next_token = torch.argmax(logits)
+            else:
+                probs = TransformerModules.softmax(logits / temperature)
+
+                sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+                cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+                # Keep the smallest set whose cumulative probability reaches top_p.
+                keep = cumulative_probs - sorted_probs < top_p
+                filtered_probs = sorted_probs * keep
+                filtered_probs /= filtered_probs.sum()
+
+                sampled_index = torch.multinomial(filtered_probs, num_samples=1)
+                next_token = sorted_indices[sampled_index].squeeze(0)
+
+            input_tokens.append(next_token.item())
+
+    return tokenizer.decode(input_tokens)
+
 if __name__ == "__main__":
     load_path = "data/tokenized/ts_train_tokenized.npy"
     save_dir = "model/ts"

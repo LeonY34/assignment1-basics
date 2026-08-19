@@ -330,6 +330,7 @@ class TransformerLM(torch.nn.Module): # 最后不会softmax和cross entropy，�
     rms_final: RMSNorm
     out_embed: Linear
     num_layers: int
+    context_length: int
     
     def __init__(
         self,
@@ -345,6 +346,7 @@ class TransformerLM(torch.nn.Module): # 最后不会softmax和cross entropy，�
     ):
         super().__init__()
         self.num_layers = num_layers
+        self.context_length = context_length
         self.tblocks = torch.nn.ModuleList([
             TransformerBlock(d_model, num_heads, d_ff, theta, context_length, device=device, dtype=dtype) 
             for _ in range(num_layers)
