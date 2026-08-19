@@ -165,5 +165,6 @@ cython_debug/
 data/*.txt
 data/tokenized/*.hd5
 data/tokenized/*.npy
+*.pt
 
 .DS_Store
