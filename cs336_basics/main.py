@@ -102,7 +102,7 @@ def train(
     if init_ckpoint is not None:
         start_iteration = utils.load_checkpoint(init_ckpoint, model, optimizer) + 1
         logger.info("Resumed checkpoint=%s at iteration=%d", init_ckpoint, start_iteration)
-    
+
     model.train()
     
     for t in range(start_iteration, max_iterations + 1):
@@ -180,21 +180,35 @@ def infer_bruteforce(
 
 if __name__ == "__main__":
     # train ---------
-    load_path = "data/tokenized/ts_train_tokenized.npy"
-    save_dir = "model/ts"
+    # load_path = "data/tokenized/ts_train_tokenized.npy"
+    # save_dir = "model/ts"
 
-    train(
-        name="tiny_stories_official",
-        save_dir=save_dir,
-        load_path = load_path,
-        iterations_per_ckpoint=10,
-    )
+    # train(
+    #     name="tiny_stories_official",
+    #     save_dir=save_dir,
+    #     load_path = load_path,
+    #     iterations_per_ckpoint=10,
+    # )
     
     # eval ----------
-    # tokenizer = BPEtokenizer("cs336_basics/BPETokenizer/trained_data/ts_train_10000.pkl")
-    # model = TransformerModules.TransformerLM(10000, 4, 512, 16, 1344, 10000, 256)
-    # optimizer = TransformerModules.AdamW(model.parameters())
-    # utils.load_checkpoint("model/ts/tiny_stories_20.pt", model, optimizer)
-    # s = infer_bruteforce("Once upon a time, there was a boy named Leon.", tokenizer, model, max_tokens=256)
-    # print(s)
-    
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    tokenizer = BPEtokenizer("cs336_basics/BPETokenizer/trained_data/ts_train_10000.pkl")
+    model = TransformerModules.TransformerLM(10000, 4, 512, 16, 1344, 10000, 256)
+    optimizer = TransformerModules.AdamW(model.parameters())
+    utils.load_checkpoint(
+        "model/ts/tiny_stories_official_5000.pt",
+        model,
+        optimizer,
+        map_location=device,
+    )
+    model.to(device)
+    s = infer_bruteforce(
+        "Once upon a time, there was a boy named Leon.",
+        tokenizer,
+        model,
+        max_tokens=256,
+        device=device,
+    )
+    print(s)

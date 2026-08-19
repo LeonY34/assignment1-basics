@@ -97,8 +97,9 @@ def load_checkpoint(
     src: str | os.PathLike | BinaryIO | IO[bytes],
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
+    map_location: str | torch.device = "cpu",
 ) -> int:
-    dic = torch.load(src)
+    dic = torch.load(src, map_location=map_location)
     model.load_state_dict(dic["model"])
     optimizer.load_state_dict(dic["optimizer"])
     return dic["iteration"]
@@ -113,4 +114,3 @@ if __name__ == "__main__":
     owt_train_tokenized_npy= os.path.join(tokenized_path, "owt_train_tokenized.npy")
     hdf5_to_npy(ts_train_tokenized_path, ts_train_tokenized_npy)
     hdf5_to_npy(owt_train_tokenized_path, owt_train_tokenized_npy)
-        
