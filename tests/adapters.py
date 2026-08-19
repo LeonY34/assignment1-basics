@@ -12,6 +12,7 @@ from torch import Tensor
 from cs336_basics.BPETokenizer.BPEtokenizer import BPEtokenizer
 from cs336_basics.BPETokenizer.TokenizerAdapter import Tokenizer
 from cs336_basics.Transformer import TransformerModules
+from cs336_basics.utils import utils
 
 
 def run_linear(
@@ -519,7 +520,8 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    return utils.get_batch(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
@@ -624,7 +626,8 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    utils.save_checkpoint(model, optimizer, iteration, out)
 
 
 def run_load_checkpoint(
@@ -645,7 +648,8 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    return utils.load_checkpoint(src, model, optimizer)
 
 
 def get_tokenizer(

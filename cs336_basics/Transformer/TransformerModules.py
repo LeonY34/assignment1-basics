@@ -324,7 +324,7 @@ class TransformerBlock(torch.nn.Module):
         # layer 2
         return y + self.swiglu(self.rms2(y))
     
-class TransformerLM(torch.nn.Module): # 最后还没softmax。
+class TransformerLM(torch.nn.Module): # 最后不会softmax和cross entropy，计算出来logits
     tblocks: torch.nn.ModuleList
     in_embed: Embedding
     rms_final: RMSNorm
@@ -354,7 +354,7 @@ class TransformerLM(torch.nn.Module): # 最后还没softmax。
         self.out_embed = Linear(d_model, vocab_size, device=device, dtype=dtype)
     
     def forward(self, x: Int[Tensor, "... seq_len"]) -> Float[Tensor, "... seq_len vocab_size"]:
-        # 得到的是每个vocab_size中word的概率。seq_len维的第i个就表示预测的第i+1个的概率分布
+        # 得到的是每个vocab_size中word的概率logits。seq_len维的第i个就表示预测的第i+1个的概率分布（softmax之后）
         # embedding
         hidden = self.in_embed(x)
         
@@ -448,7 +448,7 @@ class AdamW(torch.optim.Optimizer):
                 state["b_t"] *= torch.tensor(betas, device=state["b_t"].device)
                 alpha = lr * math.sqrt(1 - state["b_t"][1]) / (1 - state["b_t"][0])
                 param.data -= lr * weight_decay * param
-                param.data-= alpha * state["m"] / (torch.sqrt(state["v"]) + eps)
+                param.data -= alpha * state["m"] / (torch.sqrt(state["v"]) + eps)
                 
         return loss
 
@@ -458,24 +458,18 @@ def lr_cos_schedule(t, alpha_max, alpha_min, T_w, T_c):
     return alpha_min
 
 def clip_gradient(param_list: Iterable[torch.nn.Parameter], max_l2_norm: float, eps: float = 1e-6):
-    # for param in param_list:
-    #     if param.grad is None: continue
-    #     grad = param.grad.data
-    #     norm = grad.norm()
-    #     if norm >= max_l2_norm: grad *= max_l2_norm / (norm + eps)
+    params = [p for p in param_list if p.grad is not None]
     norm = torch.sqrt(torch.stack([
         param.grad.pow(2).sum()
-        for param in param_list
-        if param.grad is not None
+        for param in params
     ]).sum())
     if norm >= max_l2_norm:
         scale = max_l2_norm / (norm + eps)
-        for param in param_list:
-            if param.grad is not None:
-                param.grad.data *= scale
+        for param in params:
+            param.grad.data *= scale
 
 if __name__ == "__main__":
-    
+    pass
     # model = Linear(3, 4)
     # print(model.weights.data)
     # model = RMSNorm(10)
@@ -496,5 +490,11 @@ if __name__ == "__main__":
     # print(x)
     # print(cross_entropy(logits, x))
     # train_sgd_example()
-    print(torch.optim.AdamW())
+    # print(torch.optim.AdamW())
+    # optimizer = AdamW()
+    # print(optimizer)
+    # model = TransformerLM(vo)
+    # print(model)
+    
+    
     
