@@ -9,7 +9,7 @@ import os
 import logging
 
 
-def setup_logger(name: str, log_path: str) -> logging.Logger:
+def setup_train_logger(name: str, log_path: str) -> logging.Logger:
     logger = logging.getLogger(f"cs336.train.{name}")
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -33,6 +33,29 @@ def setup_logger(name: str, log_path: str) -> logging.Logger:
     logger.addHandler(file_handler)
     return logger
 
+def setup_eval_logger(name: str, log_path: str) -> logging.Logger:
+    logger = logging.getLogger(f"cs336.eval.{name}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    for handler in logger.handlers:
+        handler.close()
+    logger.handlers.clear()
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
+    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+    return logger
 
 def train(
     name: str,
@@ -69,7 +92,7 @@ def train(
             s = input(f"Path {log_path} already exists, continue? [Y/n]\n")
         if s.upper() == "N":
             return
-    logger = setup_logger(name, log_path)
+    logger = setup_train_logger(name, log_path)
     logger.info(
         f"Start training {name}: save_dir={save_dir}, load_path={load_path}, "
         f"init_ckpoint={init_ckpoint}, vocab_size={vocab_size}, context_length={context_length}, "
@@ -177,6 +200,67 @@ def infer_bruteforce(
 
     return tokenizer.decode(input_tokens)
 
+def eval(
+    valid_path: str,
+    model_path: str,
+    num_samples: int = 64,
+    vocab_size: int = 10000,
+    context_length: int = 256,
+    d_model: int = 512,
+    d_ff: int = 1344,
+    theta: float = 10000,
+    num_layers: int = 4,
+    num_heads: int = 16,
+    batch_size: int = 32,
+    device: torch.device | None = None,
+    dtype: torch.dtype | None = None,
+    log_path: str | None = None,
+):
+    if log_path is None:
+        model_path_without_suffix, _ = os.path.splitext(model_path)
+        log_path = f"{model_path_without_suffix}_eval.log"
+    log_dir = os.path.dirname(log_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    logger = setup_eval_logger(os.path.basename(model_path), log_path)
+    logger.info(
+        "Start evaluation: valid_path=%s, model_path=%s, num_samples=%d, "
+        "batch_size=%d, context_length=%d, device=%s, dtype=%s",
+        valid_path,
+        model_path,
+        num_samples,
+        batch_size,
+        context_length,
+        device,
+        dtype,
+    )
+
+    model = TransformerModules.TransformerLM(
+        vocab_size=vocab_size,
+        num_layers=num_layers,
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        theta=theta,
+        context_length=context_length,
+        device=device,
+        dtype=dtype
+    )
+    utils.load_checkpoint(model_path, model, map_location=device)
+    arr = utils.get_mmap(valid_path)
+    model.eval()
+    loss_mean = 0
+    with torch.inference_mode():
+        for i in range(num_samples):
+            x, y = utils.get_batch(arr, batch_size, context_length, device)
+            logits = model(x)
+            loss = TransformerModules.cross_entropy(logits, y).mean()
+            loss_mean += loss.item()
+            logger.info("batch=%d/%d | loss=%.6f", i + 1, num_samples, loss.item())
+    loss_mean /= num_samples
+    logger.info("Evaluation complete | mean_loss=%.6f", loss_mean)
+    return loss_mean
+
 if __name__ == "__main__":
     # train ---------
     # load_path = "data/tokenized/ts_train_tokenized.npy"
@@ -189,26 +273,32 @@ if __name__ == "__main__":
     #     iterations_per_ckpoint=10,
     # )
     
-    # eval ----------
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    print(f"Using device: {device}")
+    # generate ----------
+    # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    # print(f"Using device: {device}")
 
-    tokenizer = BPEtokenizer("cs336_basics/BPETokenizer/trained_data/ts_train_10000.pkl")
-    model = TransformerModules.TransformerLM(10000, 4, 512, 16, 1344, 10000, 256)
-    optimizer = TransformerModules.AdamW(model.parameters())
-    utils.load_checkpoint(
-        "model/ts/tiny_stories_official_5000.pt",
-        model,
-        optimizer,
-        map_location=device,
+    # tokenizer = BPEtokenizer("cs336_basics/BPETokenizer/trained_data/ts_train_10000.pkl")
+    # model = TransformerModules.TransformerLM(10000, 4, 512, 16, 1344, 10000, 256)
+    # # optimizer = TransformerModules.AdamW(model.parameters())
+    # utils.load_checkpoint(
+    #     "model/ts/tiny_stories_official_20000_20000.pt",
+    #     model,
+    #     map_location=device,
+    # )
+    # model.to(device)
+    # s = infer_bruteforce(
+    #     "Once upon a time, there was a boy named Leon.",
+    #     tokenizer,
+    #     model,
+    #     max_tokens=256,
+    #     temperature=1.0,
+    #     device=device,
+    # )
+    # print(s)
+
+    # eval ----
+    eval(
+        "data/tokenized/ts_valid_tokenized.npy",
+        "model/ts/tiny_stories_official_20000_20000.pt",
+        device="mps"
     )
-    model.to(device)
-    s = infer_bruteforce(
-        "Once upon a time, there was a boy named Leon.",
-        tokenizer,
-        model,
-        max_tokens=256,
-        temperature=1.0,
-        device=device,
-    )
-    print(s)

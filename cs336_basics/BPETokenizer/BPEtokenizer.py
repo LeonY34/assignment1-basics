@@ -791,10 +791,10 @@ class BPEtokenizer:
 if __name__ == "__main__":
     # text = "Hello! My name is lyaaa! hhhhhh bybysfaoefjoae is good. <|endoftext|>"
     tokenizer = BPEtokenizer(vocab_size=10000, special_words=["<|endoftext|>"], parallel_num=6)
-    # tokenizer = BPEtokenizer(vocab_size=32000, special_words=["<|endoftext|>"], parallel_num=6)
-    store_path = "/Users/leon34/Desktop/CSdiy/stanfordCS336/Code/Lab/assignment1-basics/cs336_basics/BPETokenizer/trained_data/"
-    data_path = "/Users/leon34/Desktop/CSdiy/stanfordCS336/Code/Lab/assignment1-basics/data/"
-    tokenized_path = "/Users/leon34/Desktop/CSdiy/stanfordCS336/Code/Lab/assignment1-basics/data/tokenized"
+    # tokenizer = BPEtokenizer(vocab_size=32000, special_words=["<|endoftext|>"], parallel_num=8)
+    store_path = "cs336_basics/BPETokenizer/trained_data/"
+    data_path = "data/"
+    tokenized_path = "data/tokenized"
     ts_train_path = os.path.join(data_path, "TinyStoriesV2-GPT4-train.txt")
     ts_valid_path = os.path.join(data_path, "TinyStoriesV2-GPT4-valid.txt")
     owt_train_path = os.path.join(data_path, "owt_train.txt")
@@ -802,6 +802,9 @@ if __name__ == "__main__":
     
     ts_train_tokenized_path = os.path.join(tokenized_path, "ts_train_tokenized.hd5")
     owt_train_tokenized_path = os.path.join(tokenized_path, "owt_train_tokenized.hd5")
+
+    ts_valid_tokenized_path = os.path.join(tokenized_path, "ts_valid_tokenized.hd5")
+    owt_valid_tokenized_path = os.path.join(tokenized_path, "owt_valid_tokenized.hd5")
     
     ts_train_name = "_10000"
     ts_valid_name = "_2000"
@@ -836,9 +839,9 @@ if __name__ == "__main__":
     # tokenizer.train(owt_valid_path, store_file=owt_valid_store_path)
     # tokenizer.train(owt_train_path, store_file=owt_train_store_path)
     
-    # tokenizer.load_from_file(ts_valid_store_path)
-    tokenizer.load_from_file(owt_train_store_path)
-    # tokenizer.load_from_file(owt_valid_store_path)
+    tokenizer.load_from_file(ts_train_store_path)
+    # tokenizer.load_from_file(owt_train_store_path)
+    # tokenizer.load_from_file(owt_train_store_path)
     # tokenizer.load_from_file(train_store_path)
     # print(tokenizer.longest_tokens(5))
     # text = "s"
@@ -859,5 +862,5 @@ if __name__ == "__main__":
     
     # decoded = tokenizer.decode(tokens)
     # print(decoded)
-    tokenizer.encode_file(owt_train_path, owt_train_tokenized_path, parallel_num=8)
+    tokenizer.encode_file(ts_valid_path, ts_valid_tokenized_path, parallel_num=8)
     # tokenizer.load_from_file("Lab1/assignment1-basics/cs336_basics/BPETokenizer/trained_data/TinyStoriesV2-GPT4-valid.txt.pkl")

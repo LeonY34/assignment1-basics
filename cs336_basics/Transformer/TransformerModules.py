@@ -331,6 +331,11 @@ class TransformerLM(torch.nn.Module): # 最后不会softmax和cross entropy，�
     out_embed: Linear
     num_layers: int
     context_length: int
+    vocab_size: int
+    num_heads: int
+    d_model: int
+    d_ff: int
+    theta: float
     
     def __init__(
         self,
@@ -347,6 +352,11 @@ class TransformerLM(torch.nn.Module): # 最后不会softmax和cross entropy，�
         super().__init__()
         self.num_layers = num_layers
         self.context_length = context_length
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.vocab_size = vocab_size
+        self.theta = theta
+        self.d_ff = d_ff
         self.tblocks = torch.nn.ModuleList([
             TransformerBlock(d_model, num_heads, d_ff, theta, context_length, device=device, dtype=dtype) 
             for _ in range(num_layers)
