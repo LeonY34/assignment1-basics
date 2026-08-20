@@ -89,7 +89,8 @@ def save_checkpoint(
     dic = {
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
-        "iteration": iteration
+        "iteration": iteration,
+        "batch_rng_state": np.random.get_state()
     }
     torch.save(dic, out)
     
@@ -99,9 +100,12 @@ def load_checkpoint(
     optimizer: torch.optim.Optimizer | None = None,
     map_location: str | torch.device = "cpu",
 ) -> int:
-    dic = torch.load(src, map_location=map_location)
+    # Local training checkpoints include NumPy's RNG tuple, which is not part of
+    # PyTorch's restricted weights-only format.
+    dic: dict = torch.load(src, map_location=map_location, weights_only=False)
     model.load_state_dict(dic["model"])
     if optimizer is not None: optimizer.load_state_dict(dic["optimizer"])
+    if "batch_rng_state" in dic: np.random.set_state(dic["batch_rng_state"])
     return dic["iteration"]
     
 

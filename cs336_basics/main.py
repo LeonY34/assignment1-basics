@@ -57,6 +57,33 @@ def setup_eval_logger(name: str, log_path: str) -> logging.Logger:
     logger.addHandler(file_handler)
     return logger
 
+
+def evaluate_model(
+    model: torch.nn.Module,
+    valid_arr: np.ndarray,
+    num_samples: int,
+    batch_size: int,
+    context_length: int,
+    device: torch.device | str | None,
+    seed: int = 336,
+) -> float:
+    """Evaluate an in-memory model without changing training RNG or mode."""
+    batch_rng_state = np.random.get_state()
+    was_training = model.training
+    try:
+        np.random.seed(seed)
+        model.eval()
+        loss_sum = 0.0
+        with torch.inference_mode():
+            for _ in range(num_samples):
+                x, y = utils.get_batch(valid_arr, batch_size, context_length, device)
+                logits = model(x)
+                loss_sum += TransformerModules.cross_entropy(logits, y).mean().item()
+        return loss_sum / num_samples
+    finally:
+        np.random.set_state(batch_rng_state)
+        model.train(was_training)
+
 def train(
     name: str,
     save_dir: str,
@@ -82,8 +109,14 @@ def train(
     iterations_per_ckpoint: int = 500,
     max_l2_norm: float = 1.0,
     device: torch.device | None = None,
-    dtype: torch.dtype | None = None
+    dtype: torch.dtype | None = None,
+    seed: int = 42,
+    valid_path: str | None = "data/tokenized/ts_valid_tokenized.npy",
+    eval_num_samples: int = 64,
+    eval_batch_size: int = 32,
+    eval_seed: int = 336,
 ):
+    np.random.seed(seed)
     os.makedirs(save_dir, exist_ok=True)
     log_path = os.path.join(save_dir, f"{name}.log")
     if os.path.exists(log_path):
@@ -100,9 +133,12 @@ def train(
         f"theta={theta}, batch_size={batch_size}, max_iterations={max_iterations}, "
         f"alpha_max={alpha_max}, alpha_min={alpha_min}, T_w={T_w}, T_c={T_c}, "
         f"betas={betas}, eps={eps}, weight_decay={weight_decay}, "
-        f"max_l2_norm={max_l2_norm}, device={device}, dtype={dtype}"
+        f"max_l2_norm={max_l2_norm}, device={device}, dtype={dtype}, seed={seed}, "
+        f"valid_path={valid_path}, eval_num_samples={eval_num_samples}, "
+        f"eval_batch_size={eval_batch_size}, eval_seed={eval_seed}"
     )
     token_arr = utils.get_mmap(load_path)
+    valid_arr = utils.get_mmap(valid_path) if valid_path is not None else None
     model = TransformerModules.TransformerLM(
         vocab_size=vocab_size,
         num_layers=num_layers,
@@ -152,6 +188,23 @@ def train(
             checkpoint_path = os.path.join(save_dir, f"{name}_{t}.pt")
             utils.save_checkpoint(model, optimizer, t, checkpoint_path)
             logger.info("Saved checkpoint=%s", checkpoint_path)
+            if valid_arr is not None:
+                eval_loss = evaluate_model(
+                    model=model,
+                    valid_arr=valid_arr,
+                    num_samples=eval_num_samples,
+                    batch_size=eval_batch_size,
+                    context_length=context_length,
+                    device=device,
+                    seed=eval_seed,
+                )
+                logger.info(
+                    "iteration=%d/%d | eval_loss=%.6f | eval_seed=%d",
+                    t,
+                    max_iterations,
+                    eval_loss,
+                    eval_seed,
+                )
 
     logger.info("Training complete at iteration=%d", max_iterations)
         
@@ -215,6 +268,7 @@ def eval(
     device: torch.device | None = None,
     dtype: torch.dtype | None = None,
     log_path: str | None = None,
+    seed: int = 336
 ):
     if log_path is None:
         model_path_without_suffix, _ = os.path.splitext(model_path)
@@ -248,31 +302,36 @@ def eval(
     )
     utils.load_checkpoint(model_path, model, map_location=device)
     arr = utils.get_mmap(valid_path)
-    model.eval()
-    loss_mean = 0
-    with torch.inference_mode():
-        for i in range(num_samples):
-            x, y = utils.get_batch(arr, batch_size, context_length, device)
-            logits = model(x)
-            loss = TransformerModules.cross_entropy(logits, y).mean()
-            loss_mean += loss.item()
-            logger.info("batch=%d/%d | loss=%.6f", i + 1, num_samples, loss.item())
-    loss_mean /= num_samples
+    loss_mean = evaluate_model(
+        model=model,
+        valid_arr=arr,
+        num_samples=num_samples,
+        batch_size=batch_size,
+        context_length=context_length,
+        device=device,
+        seed=seed,
+    )
     logger.info("Evaluation complete | mean_loss=%.6f", loss_mean)
     return loss_mean
 
 if __name__ == "__main__":
     # train ---------
-    # load_path = "data/tokenized/ts_train_tokenized.npy"
-    # save_dir = "model/ts"
+    load_path = "data/tokenized/ts_train_tokenized.npy"
+    save_dir = "model/ts"
 
-    # train(
-    #     name="tiny_stories_official",
-    #     save_dir=save_dir,
-    #     load_path = load_path,
-    #     iterations_per_ckpoint=10,
-    # )
-    
+    train(
+        name="tiny_stories_64_20000_095",
+        save_dir=save_dir,
+        load_path=load_path,
+        iterations_per_ckpoint=4000,
+        batch_size=64,
+        max_iterations=20000,
+        T_c=20000,
+        device="cuda:2",
+        betas=(0.9, 0.95)
+    )
+
+
     # generate ----------
     # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     # print(f"Using device: {device}")
@@ -297,8 +356,9 @@ if __name__ == "__main__":
     # print(s)
 
     # eval ----
-    eval(
-        "data/tokenized/ts_valid_tokenized.npy",
-        "model/ts/tiny_stories_official_20000_20000.pt",
-        device="mps"
-    )
+    # eval(
+    #     "data/tokenized/ts_valid_tokenized.npy",
+    #     "model/ts/tiny_stories_official_10000_128_10000.pt",
+    #     # device="mps"
+    #     device="cuda:4"
+    # )
