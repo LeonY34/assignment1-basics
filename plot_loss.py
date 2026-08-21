@@ -58,37 +58,34 @@ def moving_average(values: np.ndarray, window: int) -> np.ndarray:
     return (cumulative[ends] - cumulative[starts]) / (ends - starts)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot a loss curve from a training log.")
-    parser.add_argument("log", type=Path, help="Path to the .log file")
-    parser.add_argument("-o", "--output", type=Path, help="Output image (default: <log>_loss.png)")
-    parser.add_argument(
-        "-w", "--smooth-window", type=int, default=10, help="Moving-average window; 1 disables smoothing (default: 10)"
-    )
-    parser.add_argument("--dpi", type=int, default=160, help="Output resolution (default: 160)")
-    parser.add_argument("--show", action="store_true", help="Also open an interactive plot window")
-    args = parser.parse_args()
+def plot_losses(
+    log_path: Path,
+    output: Path | None = None,
+    smooth_window: int = 10,
+    dpi: int = 160,
+    show: bool = False,
+) -> Path:
+    """Plot training and evaluation losses parsed from one run log."""
+    if smooth_window < 1:
+        raise ValueError("smooth_window must be at least 1")
+    if not log_path.is_file():
+        raise FileNotFoundError(f"log file does not exist: {log_path}")
 
-    if args.smooth_window < 1:
-        parser.error("--smooth-window must be at least 1")
-    if not args.log.is_file():
-        parser.error(f"log file does not exist: {args.log}")
-
-    output = args.output or args.log.with_name(f"{args.log.stem}_loss.png")
+    output = output or log_path.with_name(f"{log_path.stem}_loss.png")
     output.parent.mkdir(parents=True, exist_ok=True)
-    iterations, losses = parse_loss(args.log)
-    eval_iterations, eval_losses = parse_eval_loss(args.log)
+    iterations, losses = parse_loss(log_path)
+    eval_iterations, eval_losses = parse_eval_loss(log_path)
 
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(iterations, losses, color="tab:blue", alpha=0.3, linewidth=1, label="Loss")
-    if args.smooth_window > 1:
-        smoothed = moving_average(losses, args.smooth_window)
+    if smooth_window > 1:
+        smoothed = moving_average(losses, smooth_window)
         ax.plot(
             iterations,
             smoothed,
             color="tab:blue",
             linewidth=2,
-            label=f"Moving average ({args.smooth_window} points)",
+            label=f"Moving average ({smooth_window} points)",
         )
     if len(eval_iterations):
         ax.plot(
@@ -100,19 +97,45 @@ def main() -> None:
             label="Evaluation loss",
         )
 
-    ax.set(title=args.log.stem, xlabel="Iteration", ylabel="Loss")
+    ax.set(title=log_path.stem, xlabel="Iteration", ylabel="Loss")
     ax.grid(True, alpha=0.25)
     ax.legend()
     fig.tight_layout()
-    fig.savefig(output, dpi=args.dpi)
+    fig.savefig(output, dpi=dpi)
+    if show:
+        plt.show()
+    plt.close(fig)
+    return output
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Plot a loss curve from a training log.")
+    parser.add_argument("log", type=Path, help="Path to the .log file")
+    parser.add_argument("-o", "--output", type=Path, help="Output image (default: <log>_loss.png)")
+    parser.add_argument(
+        "-w", "--smooth-window", type=int, default=10, help="Moving-average window; 1 disables smoothing (default: 10)"
+    )
+    parser.add_argument("--dpi", type=int, default=160, help="Output resolution (default: 160)")
+    parser.add_argument("--show", action="store_true", help="Also open an interactive plot window")
+    args = parser.parse_args()
+
+    try:
+        output = plot_losses(
+            log_path=args.log,
+            output=args.output,
+            smooth_window=args.smooth_window,
+            dpi=args.dpi,
+            show=args.show,
+        )
+    except (ValueError, FileNotFoundError) as error:
+        parser.error(str(error))
+
+    _, losses = parse_loss(args.log)
+    _, eval_losses = parse_eval_loss(args.log)
     print(
         f"Parsed {len(losses)} training points and {len(eval_losses)} evaluation points; "
         f"saved loss plot to {output}"
     )
-
-    if args.show:
-        plt.show()
-    plt.close(fig)
 
 
 if __name__ == "__main__":

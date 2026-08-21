@@ -32,7 +32,8 @@ class Init:
         d_in: int, 
         d_out: int, 
         device: torch.dtype | None = None, 
-        dtype: torch.device | None = None
+        dtype: torch.device | None = None,
+        shared: bool = False,
     ) -> torch.nn.Parameter:
         
         x = torch.nn.Parameter(
@@ -43,7 +44,11 @@ class Init:
                 dtype=dtype,
             )
         )
-        torch.nn.init.trunc_normal_(x, 0, 1, -3, 3)
+        if not shared:
+            torch.nn.init.trunc_normal_(x, 0, 1, -3, 3)
+        else:
+            std = math.sqrt(2 / (d_in + d_out))
+            torch.nn.init.trunc_normal_(x, 0, std, -3 * std, 3 * std)
         return x
     
     @staticmethod
@@ -88,13 +93,14 @@ class Embedding(torch.nn.Module):
         self,
         num_embeddings: int,
         embedding_dim: int,
+        shared: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
-        self.embed_map = Init.embedding(num_embeddings, embedding_dim, device=device, dtype=dtype)
+        self.embed_map = Init.embedding(num_embeddings, embedding_dim, shared=shared, device=device, dtype=dtype)
         
     def forward(self, token_ids: Int[Tensor, "..."]) -> Float[Tensor, "... d_model"]:
         return self.embed_map[token_ids]
@@ -336,6 +342,7 @@ class TransformerLM(torch.nn.Module): # 最后不会softmax和cross entropy，�
     d_model: int
     d_ff: int
     theta: float
+    shared_embedding: bool
     
     def __init__(
         self,
@@ -346,6 +353,7 @@ class TransformerLM(torch.nn.Module): # 最后不会softmax和cross entropy，�
         d_ff: int | None = None,
         theta: float | None = None,
         context_length: int | None = None,
+        shared_embedding: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None
     ):
@@ -357,13 +365,15 @@ class TransformerLM(torch.nn.Module): # 最后不会softmax和cross entropy，�
         self.vocab_size = vocab_size
         self.theta = theta
         self.d_ff = d_ff
+        self.shared_embedding = shared_embedding
         self.tblocks = torch.nn.ModuleList([
             TransformerBlock(d_model, num_heads, d_ff, theta, context_length, device=device, dtype=dtype) 
             for _ in range(num_layers)
         ])
-        self.in_embed = Embedding(vocab_size, d_model, device=device, dtype=dtype)
+        self.in_embed = Embedding(vocab_size, d_model, shared=shared_embedding, device=device, dtype=dtype)
         self.rms_final = RMSNorm(d_model, device=device, dtype=dtype)
-        self.out_embed = Linear(d_model, vocab_size, device=device, dtype=dtype)
+        if not shared_embedding:
+            self.out_embed = Linear(d_model, vocab_size, device=device, dtype=dtype)
     
     def forward(self, x: Int[Tensor, "... seq_len"]) -> Float[Tensor, "... seq_len vocab_size"]:
         # 得到的是每个vocab_size中word的概率logits。seq_len维的第i个就表示预测的第i+1个的概率分布（softmax之后）
@@ -374,8 +384,14 @@ class TransformerLM(torch.nn.Module): # 最后不会softmax和cross entropy，�
         for block in self.tblocks:
             hidden = block(hidden)
         
-        # Return logits; the training loss applies softmax internally.
-        return self.out_embed(self.rms_final(hidden))
+        final = self.rms_final(hidden)
+        if not self.shared_embedding:
+            return self.out_embed(final)
+        else:
+            return einops.einsum(
+                final, self.in_embed.embed_map, "... seq_len d_model, vocab_size d_model -> ... seq_len vocab_size"
+            )
+            
 
 def cross_entropy(
     logits: Float[Tensor, "... batch_size vocab_size"], 
