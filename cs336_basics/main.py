@@ -432,67 +432,79 @@ if __name__ == "__main__":
     #     # betas=(0.9, 0.95)
     # )
 
-    # train(
-    #     name="owt_shared_layer_8_40000_32",
-    #     save_dir=save_dir,
-    #     load_path=load_path,
-    #     vocab_size=32000,
-    #     iterations_per_ckpoint=4000,
-    #     batch_size=32,
-    #     max_iterations=40000,
-    #     T_c=40000,
-    #     num_layers=8,
-    #     shared_embedding=True,
-    #     device="cuda:7",
-    #     valid_path="data/tokenized/owt_valid_tokenized.npy"
-    #     # betas=(0.9, 0.95)
-    # )
+    train(
+        name="owt_shared_layer_12_160000_48",
+        save_dir=save_dir,
+        load_path=load_path,
+        vocab_size=32000,
+        iterations_per_ckpoint=10000,
+        batch_size=48,
+        max_iterations=160000,
+        T_c=160000,
+        num_layers=12,
+        shared_embedding=True,
+        init_ckpoint="model/owt/owt_shared_layer_12_160000_48_90000.pt",
+        device="cuda:7",
+        valid_path="data/tokenized/owt_valid_tokenized.npy"
+        # betas=(0.9, 0.95)
+    )
 
 
     # generate ----------
     # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    # device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
+    # print(f"Using device: {device}")
 
-    tokenizer = BPEtokenizer("cs336_basics/BPETokenizer/trained_data/ts_train_10000.pkl")
-    # tokenizer = BPEtokenizer("cs336_basics/BPETokenizer/trained_data/owt_train_32000.pkl")
-    model = TransformerModules.TransformerLM(10000, 4, 512, 16, 1344, 10000, 256, shared_embedding=True)
-    # model = TransformerModules.TransformerLM(10000, 4, 512, 16, 1344, 10000, 256, shared_embedding=False)
-    # model = TransformerModules.TransformerLM(32000, 4, 512, 16, 1344, 10000, 256)
-    # optimizer = TransformerModules.AdamW(model.parameters())
-    utils.load_checkpoint(
-        "model/ts/ts_shared_20000_64_20000.pt",
-        # "model/owt/owt_40000_32_40000.pt",
-        model,
-        map_location=device,
-    )
-    model.to(device)
-    s = infer_bruteforce(
-        "Once upon a time, there was a boy named Leon.",
-        tokenizer,
-        model,
-        max_tokens=256,
-        temperature=0.0,
-        device=device,
-    )
-    print(s)
-    s = infer_bruteforce(
-        "The Chinese translation of \"good\" is:",
-        tokenizer,
-        model,
-        max_tokens=256,
-        temperature=0.0,
-        device=device,
-    )
-    s = infer_bruteforce(
-        "<|endoftext|>",
-        tokenizer,
-        model,
-        max_tokens=256,
-        temperature=0.0,
-        device=device,
-    )
-    print(s)
+    # tokenizer = BPEtokenizer("cs336_basics/BPETokenizer/trained_data/ts_train_10000.pkl")
+    # # tokenizer = BPEtokenizer("cs336_basics/BPETokenizer/trained_data/owt_train_32000.pkl")
+    # model = TransformerModules.TransformerLM(10000, 4, 512, 16, 1344, 10000, 256, shared_embedding=True)
+    # # model = TransformerModules.TransformerLM(10000, 4, 512, 16, 1344, 10000, 256, shared_embedding=False)
+    # # model = TransformerModules.TransformerLM(32000, 4, 512, 16, 1344, 10000, 256)
+    # # optimizer = TransformerModules.AdamW(model.parameters())
+    # utils.load_checkpoint(
+    #     # "model/ts/ts_shared_20000_64_20000.pt",
+    #     "model/ts/ts_shared_40000_32_40000.pt",
+    #     # "model/owt/owt_40000_32_40000.pt",
+    #     model,
+    #     map_location=device,
+    # )
+    # model.to(device)
+    # s = infer_bruteforce(
+    #     "Once upon a time, there was a boy named Leon.",
+    #     tokenizer,
+    #     model,
+    #     max_tokens=256,
+    #     temperature=0.0,
+    #     device=device,
+    # )
+    # print(s)
+    # s = infer_bruteforce(
+    #     "The Chinese translation of \"good\" is:",
+    #     tokenizer,
+    #     model,
+    #     max_tokens=256,
+    #     temperature=0.0,
+    #     device=device,
+    # )
+    # print(s)
+    # s = infer_bruteforce(
+    #     "<|endoftext|>",
+    #     tokenizer,
+    #     model,
+    #     max_tokens=256,
+    #     temperature=0.0,
+    #     device=device,
+    # )
+    # print(s)
+    # s = infer_bruteforce(
+    #     "Leon likes to eat",
+    #     tokenizer,
+    #     model,
+    #     max_tokens=256,
+    #     temperature=0.0,
+    #     device=device,
+    # )
+    # print(s)
 
     # eval ----
     # eval(
