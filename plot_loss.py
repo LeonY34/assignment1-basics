@@ -96,6 +96,17 @@ def plot_losses(
             linewidth=2,
             label="Evaluation loss",
         )
+        for iteration, loss in zip(eval_iterations, eval_losses):
+            ax.annotate(
+                f"{loss:.4g}",
+                xy=(iteration, loss),
+                xytext=(0, 8),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color="tab:red",
+            )
 
     ax.set(title=log_path.stem, xlabel="Iteration", ylabel="Loss")
     ax.grid(True, alpha=0.25)
